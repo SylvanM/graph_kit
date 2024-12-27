@@ -1,0 +1,11 @@
+[package]
+name = "graph_kit"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "A library for graph algorithms"
+readme = "README.md"
+
+[dependencies]
+algebra_kit = "0.1.14"
+matrix_kit = "0.2.2"
