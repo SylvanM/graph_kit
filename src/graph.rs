@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{collections::{HashMap, HashSet, VecDeque}, debug_assert, debug_assert_eq, debug_assert_ne, hash::Hash, println};
+use std::{collections::{HashMap, HashSet}, debug_assert, debug_assert_eq, hash::Hash};
 
 use matrix_kit::dynamic::matrix::*;
 use algebra_kit::algebra::PoRing;
@@ -217,6 +217,25 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         true
     }
 
+    // MARK: Printing
+
+    /// Writes `items` as a set, like `{ a, b, c }`, or `{ }` if there are none.
+    /// 
+    /// Used by this graph's `Display` and `Debug` implementations.
+    fn write_set<T: fmt::Display>(f: &mut fmt::Formatter<'_>, items: impl IntoIterator<Item = T>) -> fmt::Result {
+        write!(f, "{{")?;
+
+        for (i, item) in items.into_iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+
+            write!(f, " {}", item)?;
+        }
+
+        write!(f, " }}")
+    }
+
 }
 
 impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Display for Graph<Node, W> {
@@ -233,28 +252,57 @@ impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Display for G
         for index in 0..self.num_nodes {
             let node = self.index_to_node(index);
 
-            write!(f, "{} : {{", node)?;
+            write!(f, "{} : ", node)?;
 
-            for (i, neighbor) in self.get_neighbors(node, true).iter().enumerate() {
-                if i > 0 {
-                    write!(f, ",")?;
-                }
-
+            Self::write_set(f, self.get_neighbors(node, true).iter().map(|neighbor| {
                 let weight = self.weight_matrix.get(index, self.node_to_index(*neighbor));
 
                 if weight.is_zero() {
-                    write!(f, " {}", neighbor)?;
+                    neighbor.to_string()
                 } else {
-                    write!(f, " ({}, {})", neighbor, weight)?;
+                    format!("({}, {})", neighbor, weight)
                 }
-            }
+            }))?;
 
-            writeln!(f, " }}")?;
+            writeln!(f)?;
         }
 
         Ok(())
     }
 }
+
+impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Debug for Graph<Node, W> {
+
+    /// Shows the adjacency list of [`fmt::Display`], followed by this graph's
+    /// internal representation: the adjacency and weight matrices, and the
+    /// node <-> index maps.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)?;
+
+        // `Matrix`'s own `Debug` opens with a newline, so each matrix lands 
+        // just underneath its label.
+        writeln!(f, "\nadjacency matrix:{:?}\n", self.adjacency_matrix)?;
+        writeln!(f, "weight matrix:{:?}\n", self.weight_matrix)?;
+
+        // Each map is read out of its own entries, rather than by walking one 
+        // through the other, so that any disagreement between the two shows up 
+        // here. Sorting by index keeps the output deterministic.
+        let mut index_to_node: Vec<(usize, Node)> = self.index_to_node_map.iter().map(|(i, v)| (*i, *v)).collect();
+        index_to_node.sort_by_key(|(index, _)| *index);
+
+        let mut node_to_index: Vec<(Node, usize)> = self.node_to_index_map.iter().map(|(v, i)| (*v, *i)).collect();
+        node_to_index.sort_by_key(|(_, index)| *index);
+
+        write!(f, "index -> node: ")?;
+        Self::write_set(f, index_to_node.iter().map(|(index, node)| format!("{} -> {}", index, node)))?;
+
+        write!(f, "\nnode -> index: ")?;
+        Self::write_set(f, node_to_index.iter().map(|(node, index)| format!("{} -> {}", node, index)))?;
+
+        writeln!(f)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -278,5 +326,17 @@ mod tests {
         }
 
         assert_eq!(g.to_string(), "0 : { }\n1 : { }\n2 : { }\n");
+    }
+
+    #[test]
+    fn test_debug() {
+        let mut g = Graph::<usize, i32>::new();
+
+        for v in 0..3 {
+            g.add_node(v);
+        }
+
+        println!("{}", g);
+        println!("{:?}", g);
     }
 }
