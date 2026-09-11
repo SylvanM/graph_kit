@@ -8,4 +8,4 @@ readme = "README.md"
 
 [dependencies]
 algebra_kit = "0.1.14"
-matrix_kit = "0.2.2"
+matrix_kit = "0.2.36"
