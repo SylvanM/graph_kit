@@ -5,8 +5,7 @@ use matrix_kit::dynamic::matrix::*;
 use algebra_kit::algebra::PoRing;
 
 pub trait NodeType: Eq + Hash + Clone {}
-impl NodeType for usize {}
-impl NodeType for String {}
+impl<T: Eq + Hash + Clone> NodeType for T {}
 
 /// A raw graph with node type `Node` and edge weight type `W`
 /// 
