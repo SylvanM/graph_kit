@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "graph_kit"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "algebra_kit",
  "matrix_kit",

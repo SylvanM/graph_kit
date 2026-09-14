@@ -261,9 +261,28 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// Connects a node to a set of neighbors
     /// 
     /// If a node does not already exist, the node is just created
-    pub fn insert_edges(&mut self, v: Node, neighbors: Vec<Node>) {
-        for u in neighbors {
+    pub fn insert_edges(&mut self, v: Node, neighbors: &[Node]) {
+        for &u in neighbors {
             self.insert_edge(v, u);
+        }
+    }
+
+    /// Adds a set of nodes and edges between all pairs of them. 
+    /// 
+    /// If we are given nodes v1, ... vn, then there will be 
+    /// an edge (v_i, v_j) for all i < j. (That is, each node will have a 
+    /// directed edge pointing to all nodes coming after it.)
+    /// 
+    /// If you want a self-loop, you can give duplicate nodes.
+    pub fn insert_connected_component(&mut self, connected_nodes: &[Node]) {
+        let mut rest = connected_nodes;
+        while let [v, remaining @ ..] = rest {
+            self.insert_edges(*v, remaining);
+            rest = remaining;
+        }
+
+        if cfg!(debug_assertions) {
+            self.check_invariant();
         }
     }
 
