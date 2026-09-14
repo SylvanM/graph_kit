@@ -155,8 +155,8 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
             num_nodes: n,
             index_to_node_map: nodes.to_vec(),
             node_to_index_map: nodes.iter().enumerate().map(|(index, node)| (node.clone(), index)).collect(),
-            directed_neighbors_map: HashMap::new(),
-            undirected_neighbors_map: HashMap::new(),
+            directed_neighbors_map: Vec::from_iter(0..n).iter().map(|&i| (i, Vec::new())).collect(),
+            undirected_neighbors_map: Vec::from_iter(0..n).iter().map(|&i| (i, Vec::new())).collect(),
             directed_edge_set: HashSet::new(),
             undirected_edge_set: HashSet::new(),
         };
