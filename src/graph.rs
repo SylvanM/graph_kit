@@ -145,6 +145,29 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         g
     }
 
+    /// Creates a graph of just nodes with no edges yet.
+    pub fn from_nodes(nodes: &[Node]) -> Graph<Node, W> {
+        let n = nodes.iter().count();
+
+        let g = Graph {
+            adjacency_matrix: Matrix::new(n, n),
+            weight_matrix: Matrix::new(n, n),
+            num_nodes: n,
+            index_to_node_map: nodes.to_vec(),
+            node_to_index_map: nodes.iter().enumerate().map(|(index, node)| (node.clone(), index)).collect(),
+            directed_neighbors_map: HashMap::new(),
+            undirected_neighbors_map: HashMap::new(),
+            directed_edge_set: HashSet::new(),
+            undirected_edge_set: HashSet::new(),
+        };
+
+        if cfg!(debug_assertions) {
+            g.check_invariant();
+        }
+
+        g
+    }
+
     // MARK: Graph Readers
 
     /// Return a vector of neighbors of a given node `v`.
