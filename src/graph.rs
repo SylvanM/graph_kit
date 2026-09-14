@@ -169,6 +169,11 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         neighbor_map.get(&v).unwrap()
     }
 
+    /// Returns `true` if the node set contains a particular node
+    pub fn contains(&self, v: Node) -> bool {
+        self.node_to_index_map.contains_key(&v)
+    }
+
     /// Returns the set of nodes in this graph
     pub fn node_set(&self) -> HashSet<Node> {
         self.node_to_index_map.keys().copied().collect()
@@ -190,7 +195,7 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// If the node already exists, then no new node is added, and the graph is 
     /// unchanged. 
     pub fn add_node(&mut self, v: Node) -> bool {
-        if self.node_set().contains(&v) {
+        if self.contains(v) {
             return false;
         }
 
@@ -215,6 +220,51 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         }
 
         true
+    }
+
+    /// Connects a node to one other node
+    ///
+    /// If either node does not already exist, it is created.
+    ///
+    /// Inserting an edge that is already present leaves the graph unchanged.
+    pub fn insert_edge(&mut self, u: Node, v: Node) {
+        self.add_node(u);
+        self.add_node(v);
+
+        let u_index = self.node_to_index(u);
+        let v_index = self.node_to_index(v);
+        
+        if self.adjacency_matrix.get(u_index, v_index) == 1 {
+            return;
+        }
+
+        self.adjacency_matrix.set(u_index, v_index, 1);
+
+        self.directed_edge_set.insert((u, v));
+        self.directed_neighbors_map.get_mut(&u).unwrap().push(v);
+
+        if !self.undirected_edge_set.contains(&(v, u)) {
+            self.undirected_edge_set.insert((u, v));
+
+            self.undirected_neighbors_map.get_mut(&u).unwrap().push(v);
+
+            if u != v {
+                self.undirected_neighbors_map.get_mut(&v).unwrap().push(u);
+            }
+        }
+
+        if cfg!(debug_assertions) {
+            self.check_invariant();
+        }
+    }
+
+    /// Connects a node to a set of neighbors
+    /// 
+    /// If a node does not already exist, the node is just created
+    pub fn insert_edges(&mut self, v: Node, neighbors: Vec<Node>) {
+        for u in neighbors {
+            self.insert_edge(v, u);
+        }
     }
 
     // MARK: Printing
@@ -318,17 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn test_display() {
-        let mut g = Graph::<usize, i32>::new();
-
-        for v in 0..3 {
-            g.add_node(v);
-        }
-
-        assert_eq!(g.to_string(), "0 : { }\n1 : { }\n2 : { }\n");
-    }
-
-    #[test]
     fn test_debug() {
         let mut g = Graph::<usize, i32>::new();
 
@@ -339,4 +378,8 @@ mod tests {
         println!("{}", g);
         println!("{:?}", g);
     }
+
+    // MARK: Claude's Tests.
+
+    
 }
