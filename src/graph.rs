@@ -170,6 +170,11 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
     // MARK: Graph Readers
 
+    /// The number of nodes in this graph
+    pub fn num_nodes(&self) -> usize {
+        self.num_nodes
+    }
+
     /// Return a vector of neighbors of a given node `v`.
     /// 
     /// Crashes if `v` is not in the node set.
