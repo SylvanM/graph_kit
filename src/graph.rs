@@ -4,8 +4,9 @@ use std::{collections::{HashMap, HashSet}, debug_assert, debug_assert_eq, hash::
 use matrix_kit::dynamic::matrix::*;
 use algebra_kit::algebra::PoRing;
 
-pub trait NodeType: Eq + Hash + Copy {}
+pub trait NodeType: Eq + Hash + Clone {}
 impl NodeType for usize {}
+impl NodeType for String {}
 
 /// A raw graph with node type `Node` and edge weight type `W`
 /// 
@@ -23,33 +24,33 @@ pub struct Graph<Node: NodeType = usize, W: PoRing = i32> {
     num_nodes: usize,
 
     /// Internal mapping from node indices to generic node values
-    index_to_node_map: HashMap<usize, Node>,
+    index_to_node_map: Vec<Node>,
 
     /// Internal mapping from generic nodes to node indices
     node_to_index_map: HashMap<Node, usize>,
 
-    /// Map from a node to its directed neighbors
-    directed_neighbors_map: HashMap<Node, Vec<Node>>,
+    /// Map from a node index to the indices of its directed neighbors
+    directed_neighbors_map: HashMap<usize, Vec<usize>>,
 
-    /// Map from a node to its undirected neighbors
-    undirected_neighbors_map: HashMap<Node, Vec<Node>>,
+    /// Map from a node index to the indices of its undirected neighbors
+    undirected_neighbors_map: HashMap<usize, Vec<usize>>,
 
-    /// A set of all directed edges in this graph
-    directed_edge_set: HashSet<(Node, Node)>,
+    /// A set of all directed edges in this graph, by node index
+    directed_edge_set: HashSet<(usize, usize)>,
 
-    /// A set of all undirected edges in this graph
-    undirected_edge_set: HashSet<(Node, Node)>,
+    /// A set of all undirected edges in this graph, by node index
+    undirected_edge_set: HashSet<(usize, usize)>,
 
 }
 
 impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
-    fn node_to_index(&self, node: Node) -> usize {
-        *self.node_to_index_map.get(&node).unwrap()
+    fn node_to_index(&self, node: &Node) -> usize {
+        *self.node_to_index_map.get(node).unwrap()
     }
 
-    fn index_to_node(&self, index: usize) -> Node {
-        *self.index_to_node_map.get(&index).unwrap()
+    fn index_to_node(&self, index: usize) -> &Node {
+        &self.index_to_node_map[index]
     }
 
     fn check_invariant(&self) {
@@ -61,14 +62,14 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         debug_assert_eq!(self.num_nodes, self.weight_matrix.row_count(), "Weight matrix wrong height");
         debug_assert_eq!(self.num_nodes, self.weight_matrix.col_count(), "Weight matrix wrong width");
 
-        debug_assert_eq!(self.num_nodes, self.index_to_node_map.keys().count(), "Index -> Node map wrong size");
+        debug_assert_eq!(self.num_nodes, self.index_to_node_map.len(), "Index -> Node map wrong size");
         debug_assert_eq!(self.num_nodes, self.node_to_index_map.keys().count(), "Node -> Index map wrong size");
 
         // Make sure the index mapping is total on [0, n), and that it 
         // corresponds with the node -> index mapping
         debug_assert!(
             (0..self.num_nodes).all(|i|
-                match self.index_to_node_map.get(&i) {
+                match self.index_to_node_map.get(i) {
                     Some(node) => match self.node_to_index_map.get(&node) {
                         Some(index) => *index == i,
                         None => false,
@@ -81,20 +82,15 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
         // Make sure *_neighbors_map has no erroneous entries
         // This includes checking that u_neighbors returns a proper set
-        for node in self.node_set() {
-            let d_neighbors = self.get_neighbors(node, true);
-            let u_neighbors = self.get_neighbors(node, false);
+        for node_index in 0..self.num_nodes {
+            let d_neighbors = self.directed_neighbors_map.get(&node_index).unwrap();
+            let u_neighbors = self.undirected_neighbors_map.get(&node_index).unwrap();
 
-            let node_index = self.node_to_index(node);
-
-            for dn in d_neighbors {
-                let dn_index = self.node_to_index(*dn);
+            for &dn_index in d_neighbors {
                 debug_assert_eq!(self.adjacency_matrix.get(node_index, dn_index), 1, "Directed neighbors map contains erroneous entry")
             }
 
-            for un in u_neighbors {
-                let un_index = self.node_to_index(*un);
-                
+            for &un_index in u_neighbors {
                 // We check to see if there is an edge (in any direction) between node and un
                 debug_assert!( 
                     self.adjacency_matrix.get(node_index, un_index) == 1 || 
@@ -106,17 +102,13 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
         // Now make sure that every edge in adjacency_matrix is indeed 
         // represented in the neighbors maps.
-        for u in self.node_set() {
-            let u_index = self.node_to_index(u);
-
-            for v in self.node_set() {
-                let v_index = self.node_to_index(v);
-
+        for u_index in 0..self.num_nodes {
+            for v_index in 0..self.num_nodes {
                 if self.adjacency_matrix.get(u_index, v_index) == 1 {
-                    debug_assert!(self.get_neighbors(u, true).contains(&v), "Directed neighbors map missing entry");
+                    debug_assert!(self.directed_neighbors_map.get(&u_index).unwrap().contains(&v_index), "Directed neighbors map missing entry");
 
-                    debug_assert!(self.get_neighbors(u, false).contains(&v), "Undirected neighbors map missing entry");
-                    debug_assert!(self.get_neighbors(v, false).contains(&u), "Undirected neighbors map missing entry");
+                    debug_assert!(self.undirected_neighbors_map.get(&u_index).unwrap().contains(&v_index), "Undirected neighbors map missing entry");
+                    debug_assert!(self.undirected_neighbors_map.get(&v_index).unwrap().contains(&u_index), "Undirected neighbors map missing entry");
                 }
             }
         }
@@ -139,7 +131,7 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
             adjacency_matrix: Matrix::new(0, 0), 
             weight_matrix: Matrix::new(0, 0), 
             num_nodes: 0, 
-            index_to_node_map: HashMap::new(), 
+            index_to_node_map: Vec::new(),
             node_to_index_map: HashMap::new(), 
             directed_neighbors_map: HashMap::new(), 
             undirected_neighbors_map: HashMap::new(), 
@@ -159,33 +151,40 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// Return a vector of neighbors of a given node `v`.
     /// 
     /// Crashes if `v` is not in the node set.
-    pub fn get_neighbors(&self, v: Node, directed: bool) -> &Vec<Node> {
+    pub fn get_neighbors(&self, v: &Node, directed: bool) -> Vec<&Node> {
         let neighbor_map = if directed {
             &self.directed_neighbors_map
         } else {
             &self.undirected_neighbors_map
         };
 
-        neighbor_map.get(&v).unwrap()
+        neighbor_map.get(&self.node_to_index(v)).unwrap()
+            .iter()
+            .map(|&index| self.index_to_node(index))
+            .collect()
     }
 
     /// Returns `true` if the node set contains a particular node
-    pub fn contains(&self, v: Node) -> bool {
-        self.node_to_index_map.contains_key(&v)
+    pub fn contains(&self, v: &Node) -> bool {
+        self.node_to_index_map.contains_key(v)
     }
 
     /// Returns the set of nodes in this graph
-    pub fn node_set(&self) -> HashSet<Node> {
-        self.node_to_index_map.keys().copied().collect()
+    pub fn node_set(&self) -> HashSet<&Node> {
+        self.node_to_index_map.keys().collect()
     }
 
     /// Returns a set of all edges in this graph
-    pub fn edge_set(&self, directed: bool) -> &HashSet<(Node, Node)> {
-        if directed {
+    pub fn edge_set(&self, directed: bool) -> HashSet<(&Node, &Node)> {
+        let edge_set = if directed {
             &self.directed_edge_set
         } else {
             &self.undirected_edge_set
-        }
+        };
+
+        edge_set.iter()
+            .map(|&(u, v)| (self.index_to_node(u), self.index_to_node(v)))
+            .collect()
     }
 
     // MARK: Graph Utility
@@ -195,7 +194,7 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// If the node already exists, then no new node is added, and the graph is 
     /// unchanged. 
     pub fn add_node(&mut self, v: Node) -> bool {
-        if self.contains(v) {
+        if self.contains(&v) {
             return false;
         }
 
@@ -209,11 +208,11 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
         self.num_nodes += 1;
 
-        self.index_to_node_map.insert(new_node_index, v);
+        self.index_to_node_map.push(v.clone());
         self.node_to_index_map.insert(v, new_node_index);
 
-        self.directed_neighbors_map.insert(v, Vec::new());
-        self.undirected_neighbors_map.insert(v, Vec::new());
+        self.directed_neighbors_map.insert(new_node_index, Vec::new());
+        self.undirected_neighbors_map.insert(new_node_index, Vec::new());
 
         if cfg!(debug_assertions) {
             self.check_invariant();
@@ -227,29 +226,34 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// If either node does not already exist, it is created.
     ///
     /// Inserting an edge that is already present leaves the graph unchanged.
-    pub fn insert_edge(&mut self, u: Node, v: Node) {
-        self.add_node(u);
-        self.add_node(v);
+    pub fn insert_edge(&mut self, u: &Node, v: &Node) {
+        if !self.contains(u) {
+            self.add_node(u.clone());
+        }
+
+        if !self.contains(v) {
+            self.add_node(v.clone());
+        }
 
         let u_index = self.node_to_index(u);
         let v_index = self.node_to_index(v);
-        
+
         if self.adjacency_matrix.get(u_index, v_index) == 1 {
             return;
         }
 
         self.adjacency_matrix.set(u_index, v_index, 1);
 
-        self.directed_edge_set.insert((u, v));
-        self.directed_neighbors_map.get_mut(&u).unwrap().push(v);
+        self.directed_edge_set.insert((u_index, v_index));
+        self.directed_neighbors_map.get_mut(&u_index).unwrap().push(v_index);
 
-        if !self.undirected_edge_set.contains(&(v, u)) {
-            self.undirected_edge_set.insert((u, v));
+        if !self.undirected_edge_set.contains(&(v_index, u_index)) {
+            self.undirected_edge_set.insert((u_index, v_index));
 
-            self.undirected_neighbors_map.get_mut(&u).unwrap().push(v);
+            self.undirected_neighbors_map.get_mut(&u_index).unwrap().push(v_index);
 
-            if u != v {
-                self.undirected_neighbors_map.get_mut(&v).unwrap().push(u);
+            if u_index != v_index {
+                self.undirected_neighbors_map.get_mut(&v_index).unwrap().push(u_index);
             }
         }
 
@@ -261,8 +265,8 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// Connects a node to a set of neighbors
     /// 
     /// If a node does not already exist, the node is just created
-    pub fn insert_edges(&mut self, v: Node, neighbors: &[Node]) {
-        for &u in neighbors {
+    pub fn insert_edges(&mut self, v: &Node, neighbors: &[Node]) {
+        for u in neighbors {
             self.insert_edge(v, u);
         }
     }
@@ -277,12 +281,12 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     pub fn insert_connected_component(&mut self, connected_nodes: &[Node]) {
         let mut rest = connected_nodes;
 
-        if let Some(&first) = connected_nodes.first() {
-            self.add_node(first);
+        if let Some(first) = connected_nodes.first() {
+            self.add_node(first.clone());
         }
 
         while let [v, remaining @ ..] = rest {
-            self.insert_edges(*v, remaining);
+            self.insert_edges(v, remaining);
             rest = remaining;
         }
 
@@ -328,8 +332,9 @@ impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Display for G
 
             write!(f, "{} : ", node)?;
 
-            Self::write_set(f, self.get_neighbors(node, true).iter().map(|neighbor| {
-                let weight = self.weight_matrix.get(index, self.node_to_index(*neighbor));
+            Self::write_set(f, self.directed_neighbors_map.get(&index).unwrap().iter().map(|&neighbor_index| {
+                let neighbor = self.index_to_node(neighbor_index);
+                let weight = self.weight_matrix.get(index, neighbor_index);
 
                 if weight.is_zero() {
                     neighbor.to_string()
@@ -361,10 +366,9 @@ impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Debug for Gra
         // Each map is read out of its own entries, rather than by walking one 
         // through the other, so that any disagreement between the two shows up 
         // here. Sorting by index keeps the output deterministic.
-        let mut index_to_node: Vec<(usize, Node)> = self.index_to_node_map.iter().map(|(i, v)| (*i, *v)).collect();
-        index_to_node.sort_by_key(|(index, _)| *index);
+        let index_to_node: Vec<(usize, &Node)> = self.index_to_node_map.iter().enumerate().collect();
 
-        let mut node_to_index: Vec<(Node, usize)> = self.node_to_index_map.iter().map(|(v, i)| (*v, *i)).collect();
+        let mut node_to_index: Vec<(&Node, usize)> = self.node_to_index_map.iter().map(|(v, i)| (v, *i)).collect();
         node_to_index.sort_by_key(|(_, index)| *index);
 
         write!(f, "index -> node: ")?;
