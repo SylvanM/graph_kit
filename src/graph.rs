@@ -276,6 +276,11 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
     /// If you want a self-loop, you can give duplicate nodes.
     pub fn insert_connected_component(&mut self, connected_nodes: &[Node]) {
         let mut rest = connected_nodes;
+
+        if let Some(&first) = connected_nodes.first() {
+            self.add_node(first);
+        }
+
         while let [v, remaining @ ..] = rest {
             self.insert_edges(*v, remaining);
             rest = remaining;
