@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{collections::{HashMap, HashSet}, debug_assert, debug_assert_eq, hash::Hash};
+use std::{collections::{HashMap, HashSet, VecDeque}, debug_assert, debug_assert_eq, hash::Hash};
 
 use matrix_kit::dynamic::matrix::*;
 use algebra_kit::algebra::PoRing;
@@ -343,6 +343,214 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
 
 }
 
+// MARK: BFS Infra
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IndexBFSStep {
+    node: usize,
+    parent: Option<usize>, // node that discovered this one
+    depth: usize,
+}
+
+/// A breadth-first traversal over node indices.
+/// 
+/// This is the underlying BFS functionality, all BFS-related tasks can 
+/// use this.
+struct IndexBFS<'g, Node: NodeType, W: PoRing> {
+    graph: &'g Graph<Node, W>,
+    directed: bool,
+
+    /// Discovered nodes waiting to be visited, as `(node, parent)` pairs
+    queue: VecDeque<(usize, Option<usize>)>,
+
+    /// The depth of each node, or `None` if it hasn't been discovered yet
+    depths: Vec<Option<usize>>,
+}
+
+impl<'g, Node: NodeType, W: PoRing> IndexBFS<'g, Node, W> {
+
+    /// Creates a traversal with no sources.
+    fn new(graph: &'g Graph<Node, W>, directed: bool) -> IndexBFS<'g, Node, W> {
+        IndexBFS {
+            graph,
+            directed,
+            queue: VecDeque::new(),
+            depths: vec![None ; graph.num_nodes],
+        }
+    }
+
+    /// Adds a source at depth 0, unless it has already been discovered.
+    fn push_source(&mut self, index: usize) {
+        if self.depths[index].is_none() {
+            self.depths[index] = Some(0);
+            self.queue.push_back((index, None));
+        }
+    }
+
+    /// The depth of a node, or `None` if it hasn't been discovered yet.
+    fn depth(&self, index: usize) -> Option<usize> {
+        self.depths[index]
+    }
+
+}
+
+impl<Node: NodeType, W: PoRing> Iterator for IndexBFS<'_, Node, W> {
+    type Item = IndexBFSStep;
+
+    fn next(&mut self) -> Option<IndexBFSStep> {
+        let (node, parent) = self.queue.pop_front()?;
+        let depth = self.depths[node].unwrap();
+
+        let neighbors_map = if self.directed {
+            &self.graph.directed_neighbors_map
+        } else {
+            &self.graph.undirected_neighbors_map
+        };
+
+        for &neighbor in &neighbors_map[&node] {
+            if self.depths[neighbor].is_none() {
+                self.depths[neighbor] = Some(depth + 1);
+                self.queue.push_back((neighbor, Some(node)));
+            }
+        }
+
+        Some(IndexBFSStep { node, parent, depth })
+    }
+}
+
+/// A single node visited by a [`BFS`], along with the node it was discovered
+/// from and its distance from the sources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BFSStep<'g, Node> {
+    pub node: &'g Node,
+    pub parent: Option<&'g Node>,
+    pub depth: usize,
+}
+
+/// A breadth-first traversal of a graph, yielding a [`BFSStep`] for each node
+/// reachable from its sources, in order of nondecreasing depth.
+///
+/// Create one with [`Graph::bfs`].
+pub struct BFS<'g, Node: NodeType, W: PoRing> {
+    index_bfs: IndexBFS<'g, Node, W>,
+}
+
+impl<Node: NodeType, W: PoRing> BFS<'_, Node, W> {
+
+    /// Adds another source at depth 0, unless it has already been discovered.
+    ///
+    /// To keep depths as true distances, only add sources before iterating,
+    /// or once the traversal has run out.
+    ///
+    /// Crashes if `v` is not in the node set.
+    pub fn push_source(&mut self, v: &Node) {
+        let index = self.index_bfs.graph.node_to_index(v);
+        self.index_bfs.push_source(index);
+    }
+
+    /// The depth of `v`, or `None` if it hasn't been discovered yet.
+    ///
+    /// Crashes if `v` is not in the node set.
+    pub fn depth(&self, v: &Node) -> Option<usize> {
+        self.index_bfs.depth(self.index_bfs.graph.node_to_index(v))
+    }
+}
+
+impl<'g, Node: NodeType, W: PoRing> Iterator for BFS<'g, Node, W> {
+    type Item = BFSStep<'g, Node>;
+
+    fn next(&mut self) -> Option<BFSStep<'g, Node>> {
+        let graph = self.index_bfs.graph;
+        let step = self.index_bfs.next()?;
+
+        Some(BFSStep {
+            node: graph.index_to_node(step.node),
+            parent: step.parent.map(|parent| graph.index_to_node(parent)),
+            depth: step.depth,
+        })
+    }
+}
+
+impl<Node: NodeType, W: PoRing> Graph<Node, W> {
+
+    /// Starts a breadth-first traversal from `start`. More sources can be
+    /// added with [`BFS::push_source`].
+    ///
+    /// Crashes if `start` is not in the node set.
+    pub fn bfs(&self, start: &Node, directed: bool) -> BFS<'_, Node, W> {
+        let mut index_bfs = IndexBFS::new(self, directed);
+        index_bfs.push_source(self.node_to_index(start));
+
+        BFS { index_bfs }
+    }
+
+    /// Computes a BFS coloring of the graph
+    /// 
+    /// Returns three objects:
+    ///     (1) A Vec<Vec<Node>> which is a list of each BFS layer in increasing
+    ///         distance from the source, 
+    ///     (2) A Vec<Node which represents the set of all unreachable nodes, and
+    ///     (3) A HashMap<Node, Option(usize)> which is a coloring of all nodes
+    ///         of their distances, where None represents unreachable.
+    /// 
+    /// (1)+(2) together carries the same information as (3), but they are
+    /// in some sense transposes of each other, depends on what way you plan 
+    /// on using the data. Same effort to compute so might as well compute both.
+    pub fn bfs_coloring(&self, start: &Node, directed: bool) -> (
+        Vec<Vec<Node>>, Vec<Node>, HashMap<Node, Option<usize>>
+    ) {
+        let mut index_bfs = IndexBFS::new(self, directed);
+        index_bfs.push_source(self.node_to_index(start));
+
+        // Steps come out in nondecreasing depth, so each new depth starts a new layer
+        let mut layers: Vec<Vec<Node>> = Vec::new();
+        for step in index_bfs.by_ref() {
+            if step.depth == layers.len() {
+                layers.push(Vec::new());
+            }
+            layers[step.depth].push(self.index_to_node(step.node).clone());
+        }
+
+        // The main BFS stuff is done by this point, now we just do sillyness.
+
+        let mut unreachable: Vec<Node> = Vec::new();
+        let mut coloring: HashMap<Node, Option<usize>> = HashMap::new();
+        for index in 0..self.num_nodes {
+            let node = self.index_to_node(index).clone();
+            let depth = index_bfs.depth(index);
+
+            if depth.is_none() {
+                unreachable.push(node.clone());
+            }
+            coloring.insert(node, depth);
+        }
+
+        (layers, unreachable, coloring)
+    }
+
+    /// Computes connected components of the graph.
+    pub fn connected_components(&self) -> Vec<Vec<Node>> {
+        let mut connected_components = Vec::new();
+        let mut frontier = self.node_set();
+
+        while let Some(&start) = frontier.iter().next() {
+            let (layers, _, _) = self.bfs_coloring(start, false);
+            let component: Vec<Node> = layers.into_iter().flatten().collect();
+
+            for v in &component {
+                frontier.remove(v);
+            }
+            
+            connected_components.push(component);
+        }
+
+        connected_components
+    }
+
+}
+
+// MARK: Debugging
+
 impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Display for Graph<Node, W> {
 
     /// Displays this graph as an adjacency list, with one line per node:
@@ -408,6 +616,7 @@ impl<Node: NodeType + fmt::Display, W: PoRing + fmt::Display> fmt::Debug for Gra
     }
 }
 
+// MARK: Tests
 
 #[cfg(test)]
 mod tests {
@@ -436,5 +645,67 @@ mod tests {
 
     // MARK: Claude's Tests.
 
-    
+    /// The path 0 -> 1 -> 2 -> 3, plus an isolated node 4
+    fn path_graph() -> Graph<usize, i32> {
+        let mut g = Graph::new();
+
+        g.insert_edge(&0, &1);
+        g.insert_edge(&1, &2);
+        g.insert_edge(&2, &3);
+        g.add_node(4);
+
+        g
+    }
+
+    #[test]
+    fn test_bfs_path() {
+        let g = path_graph();
+        let mut bfs = g.bfs(&0, true);
+
+        let steps: Vec<(usize, Option<usize>, usize)> = bfs.by_ref()
+            .map(|step| (*step.node, step.parent.copied(), step.depth))
+            .collect();
+
+        assert_eq!(steps, vec![(0, None, 0), (1, Some(0), 1), (2, Some(1), 2), (3, Some(2), 3)]);
+        assert_eq!(bfs.depth(&3), Some(3));
+        assert_eq!(bfs.depth(&4), None);
+    }
+
+    #[test]
+    fn test_bfs_directed_vs_undirected() {
+        let g = path_graph();
+
+        assert_eq!(g.bfs(&3, true).count(), 1);
+        assert_eq!(g.bfs(&3, false).map(|step| step.depth).collect::<Vec<_>>(), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_bfs_diamond() {
+        let mut g = Graph::<usize, i32>::new();
+        g.insert_edges(&0, &[1, 2]);
+        g.insert_edge(&1, &3);
+        g.insert_edge(&2, &3);
+
+        let steps: Vec<BFSStep<usize>> = g.bfs(&0, true).collect();
+
+        assert_eq!(steps.len(), 4);
+        assert_eq!(steps[3], BFSStep { node: &3, parent: Some(&1), depth: 2 });
+    }
+
+    #[test]
+    fn test_bfs_multi_source() {
+        let g = path_graph();
+        let mut bfs = g.bfs(&0, false);
+        bfs.push_source(&3);
+
+        let depths: HashMap<usize, usize> = bfs.by_ref().map(|step| (*step.node, step.depth)).collect();
+
+        assert_eq!(depths, HashMap::from([(0, 0), (3, 0), (1, 1), (2, 1)]));
+
+        // Once exhausted, a new source starts a fresh component
+        bfs.push_source(&4);
+        assert_eq!(bfs.next(), Some(BFSStep { node: &4, parent: None, depth: 0 }));
+        assert_eq!(bfs.next(), None);
+    }
+
 }
