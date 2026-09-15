@@ -738,7 +738,7 @@ mod tests {
         g.insert_edge(&5, &6);
 
         for root in [0, 3, 5] {
-            let tree = g.bfs_tree(&root);
+            let tree = g.bfs_tree(&root, false);
             let (layers, _, _) = g.bfs_coloring(&root, false);
             let (tree_layers, tree_unreachable, _) = tree.bfs_coloring(&root, true);
 
