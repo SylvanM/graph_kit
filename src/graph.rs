@@ -528,6 +528,24 @@ impl<Node: NodeType, W: PoRing> Graph<Node, W> {
         (layers, unreachable, coloring)
     }
 
+    /// Returns a BFS sub-tree of the graph, starting from some root.
+    /// 
+    /// Weights are dropped, this is only really used for connectivity
+    /// and un-weighted distance stuff.
+    pub fn bfs_tree(&self, start: &Node, directed: bool) -> Graph<Node> {
+        let mut tree = Graph::new();
+        tree.add_node(start.clone());
+
+        // Each node gets an edge from the node that discovered it
+        for step in self.bfs(start, directed) {
+            if let Some(parent) = step.parent {
+                tree.insert_edge(parent, step.node);
+            }
+        }
+
+        tree
+    }
+
     /// Computes connected components of the graph.
     pub fn connected_components(&self) -> Vec<Vec<Node>> {
         let mut connected_components = Vec::new();
@@ -706,6 +724,30 @@ mod tests {
         bfs.push_source(&4);
         assert_eq!(bfs.next(), Some(BFSStep { node: &4, parent: None, depth: 0 }));
         assert_eq!(bfs.next(), None);
+    }
+
+    #[test]
+    fn test_bfs_tree_layers() {
+        // A diamond with a tail, a cycle back to the root, and a separate component
+        let mut g = Graph::<usize, i32>::new();
+        g.insert_edges(&0, &[1, 2]);
+        g.insert_edge(&1, &3);
+        g.insert_edge(&2, &3);
+        g.insert_edge(&3, &4);
+        g.insert_edge(&4, &0);
+        g.insert_edge(&5, &6);
+
+        for root in [0, 3, 5] {
+            let tree = g.bfs_tree(&root);
+            let (layers, _, _) = g.bfs_coloring(&root, false);
+            let (tree_layers, tree_unreachable, _) = tree.bfs_coloring(&root, true);
+
+            assert_eq!(tree_layers, layers);
+            assert!(tree_unreachable.is_empty());
+
+            // A tree has exactly one fewer edge than it has nodes
+            assert_eq!(tree.edge_set(true).len() + 1, tree.num_nodes());
+        }
     }
 
 }
